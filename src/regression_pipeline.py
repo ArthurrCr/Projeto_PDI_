@@ -13,6 +13,8 @@ def preprocess_data(df, target_column):
     # Criar a coluna com apenas o dia
     df['dia'] = df['data'].dt.day
 
+    # Converter hora pra object
+    df['hora'] = df['hora'].astype(str)
     # Converter hora para inteiro e normalizar
     df['hora'] = df['hora'].str.replace(':', '').astype(int)
     df['hora'] = df['hora'] / 10000
@@ -89,6 +91,8 @@ def impute_missing_values(df, target_column, best_model):
     # Criar a coluna com apenas o dia
     df['dia'] = df['data'].dt.day
 
+    # Converter hora pra object
+    df['hora'] = df['hora'].astype(str)
     # Converter hora para inteiro e normalizar
     df['hora'] = df['hora'].astype(str).str.replace(':', '').astype(int)
     df['hora'] = df['hora'] / 10000
@@ -98,10 +102,10 @@ def impute_missing_values(df, target_column, best_model):
     df['id_estacao_encoded'] = label_encoder.fit_transform(df['id_estacao'])
 
     # Armazenar colunas removidas para adicionar de volta posteriormente
-    original_columns = df[['data', 'id_estacao']]
+    original_columns = df[['data', 'id_estacao','ano']]
 
     # Remover colunas que não são necessárias para a previsão
-    df = df.drop(columns=['data', 'id_estacao'])
+    df = df.drop(columns=['data', 'id_estacao','ano'])
 
     # Identificar as linhas com valores ausentes no target
     nan_rows = df[df[target_column].isna()]
@@ -125,5 +129,27 @@ def impute_missing_values(df, target_column, best_model):
     # Adicionar de volta as colunas removidas
     df['data'] = original_columns['data']
     df['id_estacao'] = original_columns['id_estacao']
+    df['ano'] = original_columns['ano']
+
+    return df
+
+# Função principal para o pipeline
+def run_pipeline(df, target_columns):
+    df = df.copy()
+    for target_column in target_columns:
+        print(f'Processing target column: {target_column}')
+        
+        # Processar os dados
+        df_preprocessed, X_train_scaled, X_test_scaled, y_train, y_test, scaler, label_encoder = preprocess_data(df, target_column)
+        
+        # Treinar o modelo e avaliar seu desempenho
+        best_model = train_and_evaluate_model(X_train_scaled, X_test_scaled, y_train, y_test)
+        
+        # Imputar os valores ausentes no dataset original
+        df = impute_missing_values(df, target_column, best_model, scaler, label_encoder)
+        
+        # Verificar se há valores ausentes restantes
+        missing_values = df[target_column].isnull().sum()
+        print(f'Remaining missing values in {target_column}: {missing_values}')
 
     return df
