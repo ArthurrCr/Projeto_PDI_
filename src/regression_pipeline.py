@@ -13,11 +13,16 @@ def preprocess_data(df, target_column):
     # Criar a coluna com apenas o dia
     df['dia'] = df['data'].dt.day
 
-    # Converter hora pra object
-    df['hora'] = df['hora'].astype(str)
-    # Converter hora para inteiro e normalizar
-    df['hora'] = df['hora'].str.replace(':', '').astype(int)
-    df['hora'] = df['hora'] / 10000
+    # Converter hora para string se não for float
+    if df['hora'].dtype != float:
+        df['hora'] = df['hora'].astype(str)
+        # Remover entradas inválidas na coluna 'hora'
+        df = df[~df['hora'].str.contains("NaN|nan", na=False)]
+        # Verificar e ajustar o formato da hora
+        df['hora'] = df['hora'].apply(lambda x: x.replace(':', '') if ':' in x else x)
+        # Converter hora para inteiro e normalizar
+        df['hora'] = df['hora'].astype(int)
+        df['hora'] = df['hora'] / 10000
 
     # Inicializar o codificador de rótulos
     label_encoder = LabelEncoder()
@@ -41,7 +46,7 @@ def preprocess_data(df, target_column):
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    return df, X_train_scaled, X_test_scaled, y_train, y_test
+    return df, X_train_scaled, X_test_scaled, y_train, y_test, scaler, label_encoder
 
 # Função para treinar o modelo e avaliar seu desempenho
 def train_and_evaluate_model(X_train_scaled, X_test_scaled, y_train, y_test):
@@ -81,7 +86,7 @@ def train_and_evaluate_model(X_train_scaled, X_test_scaled, y_train, y_test):
     return best_model
 
 # Função para imputar valores ausentes no dataset
-def impute_missing_values(df, target_column, best_model):
+def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
     # Cria uma cópia do DataFrame para evitar modificar o original
     df = df.copy()
     
@@ -91,15 +96,19 @@ def impute_missing_values(df, target_column, best_model):
     # Criar a coluna com apenas o dia
     df['dia'] = df['data'].dt.day
 
-    # Converter hora pra object
-    df['hora'] = df['hora'].astype(str)
-    # Converter hora para inteiro e normalizar
-    df['hora'] = df['hora'].astype(str).str.replace(':', '').astype(int)
-    df['hora'] = df['hora'] / 10000
+    # Converter hora para string se não for float
+    if df['hora'].dtype != float:
+        df['hora'] = df['hora'].astype(str)
+        # Remover entradas inválidas na coluna 'hora'
+        df = df[~df['hora'].str.contains("NaN|nan", na=False)]
+        # Verificar e ajustar o formato da hora
+        df['hora'] = df['hora'].apply(lambda x: x.replace(':', '') if ':' in x else x)
+        # Converter hora para inteiro e normalizar
+        df['hora'] = df['hora'].astype(int)
+        df['hora'] = df['hora'] / 10000
 
-    # Inicializar o codificador de rótulos
-    label_encoder = LabelEncoder()
-    df['id_estacao_encoded'] = label_encoder.fit_transform(df['id_estacao'])
+    # Aplicar a codificação de rótulos
+    df['id_estacao_encoded'] = label_encoder.transform(df['id_estacao'])
 
     # Armazenar colunas removidas para adicionar de volta posteriormente
     original_columns = df[['data', 'id_estacao','ano']]
@@ -116,7 +125,6 @@ def impute_missing_values(df, target_column, best_model):
     X_non_nan = non_nan_rows.drop(columns=[target_column])
 
     # Escalonar os dados
-    scaler = StandardScaler()
     X_non_nan_scaled = scaler.fit_transform(X_non_nan)
     X_nan_scaled = scaler.transform(X_nan)
 
@@ -130,6 +138,9 @@ def impute_missing_values(df, target_column, best_model):
     df['data'] = original_columns['data']
     df['id_estacao'] = original_columns['id_estacao']
     df['ano'] = original_columns['ano']
+
+    # Remover colunas temporárias
+    df = df.drop(columns=['id_estacao_encoded','dia'])
 
     return df
 
