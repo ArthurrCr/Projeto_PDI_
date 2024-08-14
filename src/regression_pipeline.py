@@ -16,8 +16,6 @@ def preprocess_data(df, target_column):
     # Converter hora para string se não for float
     if df['hora'].dtype != float:
         df['hora'] = df['hora'].astype(str)
-        # Remover entradas inválidas na coluna 'hora'
-        df = df[~df['hora'].str.contains("NaN|nan", na=False)]
         # Verificar e ajustar o formato da hora
         df['hora'] = df['hora'].apply(lambda x: x.replace(':', '') if ':' in x else x)
         # Converter hora para inteiro e normalizar
@@ -99,8 +97,6 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
     # Converter hora para string se não for float
     if df['hora'].dtype != float:
         df['hora'] = df['hora'].astype(str)
-        # Remover entradas inválidas na coluna 'hora'
-        df = df[~df['hora'].str.contains("NaN|nan", na=False)]
         # Verificar e ajustar o formato da hora
         df['hora'] = df['hora'].apply(lambda x: x.replace(':', '') if ':' in x else x)
         # Converter hora para inteiro e normalizar
@@ -124,10 +120,9 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
     X_nan = nan_rows.drop(columns=[target_column])
     X_non_nan = non_nan_rows.drop(columns=[target_column])
 
-    # Escalonar os dados
-    X_non_nan_scaled = scaler.fit_transform(X_non_nan)
+    # Usar o escalonador já ajustado para transformar os dados
     X_nan_scaled = scaler.transform(X_nan)
-
+  
     # Prever os valores ausentes
     y_nan_pred = best_model.predict(X_nan_scaled)
     
