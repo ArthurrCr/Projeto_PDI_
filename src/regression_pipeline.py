@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -22,13 +23,26 @@ def preprocess_data(df, target_column):
         df['hora'] = df['hora'].astype(int)
         df['hora'] = df['hora'] / 10000
 
+    # Transformar em NAN as ocorrências de temperaturas negativas ou 0
+    df.loc[df['temperatura_min'] <= 0, 'temperatura_min'] = np.nan
+
+    # Calcular a média de temperatura mínima
+    mean_temp_min = df['temperatura_min'].mean()
+
+    # Definir os limites para outliers
+    lower_bound = mean_temp_min / 1.3
+    upper_bound = mean_temp_min * 1.3
+
+    # Transformar em NAN os valores de temperatura mínima que estão fora dos limites definidos
+    df.loc[(df['temperatura_min'] < lower_bound) | (df['temperatura_min'] > upper_bound), 'temperatura_min'] = np.nan
+
     # Inicializar o codificador de rótulos
     label_encoder = LabelEncoder()
 
     # Aplicar a codificação de rótulos
     df['id_estacao_encoded'] = label_encoder.fit_transform(df['id_estacao'])
 
-    # Remover colunas desnecessárias
+    # Remover colunas desnecessárias e com NaN
     df = df.drop(columns=['data', 'ano', 'id_estacao'])
     df = df.dropna()
 
@@ -102,6 +116,19 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
         # Converter hora para inteiro e normalizar
         df['hora'] = df['hora'].astype(int)
         df['hora'] = df['hora'] / 10000
+
+    # Transformar em NAN as ocorrências de temperaturas negativas ou 0
+    df.loc[df['temperatura_min'] <= 0, 'temperatura_min'] = np.nan
+
+    # Calcular a média de temperatura mínima
+    mean_temp_min = df['temperatura_min'].mean()
+
+    # Definir os limites para outliers
+    lower_bound = mean_temp_min / 1.3
+    upper_bound = mean_temp_min * 1.3
+
+    # Transformar em NAN os valores de temperatura mínima que estão fora dos limites definidos
+    df.loc[(df['temperatura_min'] < lower_bound) | (df['temperatura_min'] > upper_bound), 'temperatura_min'] = np.nan
 
     # Aplicar a codificação de rótulos
     df['id_estacao_encoded'] = label_encoder.transform(df['id_estacao'])
