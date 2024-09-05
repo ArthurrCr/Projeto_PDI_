@@ -26,16 +26,6 @@ def preprocess_data(df, target_column):
     # Transformar em NAN as ocorrências de temperaturas negativas ou 0
     df.loc[df['temperatura_min'] <= 0, 'temperatura_min'] = np.nan
 
-    # Calcular a média de temperatura mínima
-    mean_temp_min = df['temperatura_min'].mean()
-
-    # Definir os limites para outliers
-    lower_bound = mean_temp_min / 1.3
-    upper_bound = mean_temp_min * 1.3
-
-    # Transformar em NAN os valores de temperatura mínima que estão fora dos limites definidos
-    df.loc[(df['temperatura_min'] < lower_bound) | (df['temperatura_min'] > upper_bound), 'temperatura_min'] = np.nan
-
     # Inicializar o codificador de rótulos
     label_encoder = LabelEncoder()
 
@@ -47,8 +37,12 @@ def preprocess_data(df, target_column):
     df = df.dropna()
 
     # Separar variáveis independentes (X) e dependente (y)
-    X = df.drop(columns=[target_column])
-    y = df[target_column]
+    if target_column == 'temperatura_max':
+        X = df.drop(columns=[target_column,'temperatura_min']) # tem que remover tambem temperatura_min
+        y = df['temperatura_max']
+    elif target_column == 'temperatura_min':
+        X = df.drop(columns=[target_column,'temperatura_max']) # tem que remover tambem temperatura_max
+        y = df['temperatura_min']
 
     # Dividir em conjuntos de treino e teste, mantendo os NaNs apenas no treino
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -77,7 +71,7 @@ def train_and_evaluate_model(X_train_scaled, X_test_scaled, y_train, y_test):
 
     # Configurar o GridSearchCV
     grid_search = GridSearchCV(estimator=xg_reg, param_grid=param_grid, scoring='neg_mean_squared_error', 
-                               cv=3, verbose=1, n_jobs=-1)
+                               cv=3, verbose=1, n_jobs=2)
 
     # Executar a busca em grade
     grid_search.fit(X_train_scaled, y_train)
@@ -120,24 +114,24 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
     # Transformar em NAN as ocorrências de temperaturas negativas ou 0
     df.loc[df['temperatura_min'] <= 0, 'temperatura_min'] = np.nan
 
-    # Calcular a média de temperatura mínima
-    mean_temp_min = df['temperatura_min'].mean()
-
-    # Definir os limites para outliers
-    lower_bound = mean_temp_min / 1.3
-    upper_bound = mean_temp_min * 1.3
-
-    # Transformar em NAN os valores de temperatura mínima que estão fora dos limites definidos
-    df.loc[(df['temperatura_min'] < lower_bound) | (df['temperatura_min'] > upper_bound), 'temperatura_min'] = np.nan
-
     # Aplicar a codificação de rótulos
     df['id_estacao_encoded'] = label_encoder.transform(df['id_estacao'])
 
     # Armazenar colunas removidas para adicionar de volta posteriormente
-    original_columns = df[['data', 'id_estacao','ano']]
+    original_columns = df[['data', 'id_estacao', 'ano']]
+
+    # Manter uma cópia da coluna removida
+    temp_min_col = df['temperatura_min'].copy() if 'temperatura_min' in df.columns else None
+    temp_max_col = df['temperatura_max'].copy() if 'temperatura_max' in df.columns else None
 
     # Remover colunas que não são necessárias para a previsão
-    df = df.drop(columns=['data', 'id_estacao','ano'])
+    df = df.drop(columns=['data', 'id_estacao', 'ano'])
+
+    # Remover a coluna de temperatura que não é o target para manter consistência
+    if target_column == 'temperatura_max':
+        df = df.drop(columns=['temperatura_min'])
+    elif target_column == 'temperatura_min':
+        df = df.drop(columns=['temperatura_max'])
 
     # Identificar as linhas com valores ausentes no target
     nan_rows = df[df[target_column].isna()]
@@ -145,7 +139,6 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
 
     # Separar variáveis independentes
     X_nan = nan_rows.drop(columns=[target_column])
-    X_non_nan = non_nan_rows.drop(columns=[target_column])
 
     # Usar o escalonador já ajustado para transformar os dados
     X_nan_scaled = scaler.transform(X_nan)
@@ -161,8 +154,14 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
     df['id_estacao'] = original_columns['id_estacao']
     df['ano'] = original_columns['ano']
 
+    # Re-adicionar a coluna de temperatura que foi removida
+    if target_column == 'temperatura_max' and temp_min_col is not None:
+        df['temperatura_min'] = temp_min_col
+    elif target_column == 'temperatura_min' and temp_max_col is not None:
+        df['temperatura_max'] = temp_max_col
+
     # Remover colunas temporárias
-    df = df.drop(columns=['id_estacao_encoded','dia'])
+    df = df.drop(columns=['id_estacao_encoded', 'dia'])
 
     return df
 
