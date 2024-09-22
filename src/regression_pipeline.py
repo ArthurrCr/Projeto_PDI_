@@ -1,18 +1,21 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 def preprocess_data(df, target_column):
-    # cria uma cópia
+    # Cria uma cópia
     df = df.copy()
     # Converter data para o formato datetime
     df['data'] = pd.to_datetime(df['data'], format='%Y-%m-%d')
 
-    # Criar a coluna com apenas o dia
+    # Criar as colunas com dia, mes e ano
     df['dia'] = df['data'].dt.day
+    df['mes'] = df['data'].dt.month  # Adiciona a coluna do mês
+    df['ano'] = df['data'].dt.year  # Adiciona a coluna do ano
 
     # Converter hora para string se não for float
     if df['hora'].dtype != float:
@@ -38,13 +41,13 @@ def preprocess_data(df, target_column):
 
     # Separar variáveis independentes (X) e dependente (y)
     if target_column == 'temperatura_max':
-        X = df.drop(columns=[target_column,'temperatura_min']) # tem que remover tambem temperatura_min
+        X = df.drop(columns=[target_column, 'temperatura_min'])  # Remover também temperatura_min
         y = df['temperatura_max']
     elif target_column == 'temperatura_min':
-        X = df.drop(columns=[target_column,'temperatura_max']) # tem que remover tambem temperatura_max
+        X = df.drop(columns=[target_column, 'temperatura_max'])  # Remover também temperatura_max
         y = df['temperatura_min']
 
-    # Dividir em conjuntos de treino e teste, mantendo os NaNs apenas no treino
+    # Dividir em conjuntos de treino e teste, mantendo os NaNs apenas no teste
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     # Escalonar os dados
@@ -101,6 +104,8 @@ def impute_missing_values(df, target_column, best_model, scaler, label_encoder):
 
     # Criar a coluna com apenas o dia
     df['dia'] = df['data'].dt.day
+    df['mes'] = df['data'].dt.month  # Adiciona a coluna do mês
+    df['ano'] = df['data'].dt.year  # Adiciona a coluna do ano
 
     # Converter hora para string se não for float
     if df['hora'].dtype != float:
@@ -185,3 +190,87 @@ def run_pipeline(df, target_columns):
         print(f'Remaining missing values in {target_column}: {missing_values}')
 
     return df
+
+def plot_average_temperatures(df_before, df_after, year):
+    """
+    Plota as temperaturas máximas e mínimas médias mensais antes e depois da imputação.
+
+    Args:
+        df_before (pd.DataFrame): DataFrame antes da imputação.
+        df_after (pd.DataFrame): DataFrame após a imputação.
+        year (int): Ano referente aos dados.
+    """
+    print(f'Iniciando plotagem para o ano {year}...')
+    
+    # Filtrar os dados para o ano específico
+    df_before_year = df_before[df_before['data'].dt.year == year]
+    df_after_year = df_after[df_after['data'].dt.year == year]
+    
+    # Verificar se os DataFrames filtrados não estão vazios
+    if df_before_year.empty:
+        print(f"Aviso: df_before_year está vazio para o ano {year}.")
+    if df_after_year.empty:
+        print(f"Aviso: df_after_year está vazio para o ano {year}.")
+    
+    # Agrupar por mês e calcular a temperatura máxima e mínima média
+    temperatura_anual_before = df_before_year.groupby('mes').agg(
+        temperatura_max_before=('temperatura_max', 'mean'),
+        temperatura_min_before=('temperatura_min', 'mean')
+    ).reset_index()
+    
+    temperatura_anual_after = df_after_year.groupby('mes').agg(
+        temperatura_max_after=('temperatura_max', 'mean'),
+        temperatura_min_after=('temperatura_min', 'mean')
+    ).reset_index()
+    
+    
+    # Combinar os dados antes e depois para facilitar a plotagem
+    temperatura_comparativa = pd.merge(
+        temperatura_anual_before, 
+        temperatura_anual_after, 
+        on='mes', 
+        how='inner'
+    )
+    
+    
+    # Plotar a série temporal anual
+    plt.figure(figsize=(12, 6))  # Ajusta o tamanho do gráfico
+
+    # Temperatura Máxima
+    plt.plot(
+        temperatura_comparativa['mes'], 
+        temperatura_comparativa['temperatura_max_before'], 
+        label='Máxima Antes da Imputação', 
+        marker='o', 
+        linestyle='--'
+    )
+    plt.plot(
+        temperatura_comparativa['mes'], 
+        temperatura_comparativa['temperatura_max_after'], 
+        label='Máxima Depois da Imputação', 
+        marker='o'
+    )
+
+    # Temperatura Mínima
+    plt.plot(
+        temperatura_comparativa['mes'], 
+        temperatura_comparativa['temperatura_min_before'], 
+        label='Mínima Antes da Imputação', 
+        marker='s', 
+        linestyle='--'
+    )
+    plt.plot(
+        temperatura_comparativa['mes'], 
+        temperatura_comparativa['temperatura_min_after'], 
+        label='Mínima Depois da Imputação', 
+        marker='s'
+    )
+
+    plt.xlabel('Mês')
+    plt.ylabel('Temperatura Média (°C)')
+    plt.title(f'Temperaturas Máxima e Mínima Mensais - Ano {year}')
+    plt.xticks(range(1, 13))  # Define os ticks do eixo x para cada mês
+    plt.legend()
+    plt.grid(True)  # Adiciona uma grade para melhor visualização
+    plt.tight_layout()  # Ajusta o layout para evitar sobreposição
+    plt.show()
