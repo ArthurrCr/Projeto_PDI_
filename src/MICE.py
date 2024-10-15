@@ -2,19 +2,16 @@ import pandas as pd
 import numpy as np
 from sklearn.experimental import enable_iterative_imputer  # Necessário para o IterativeImputer
 from sklearn.impute import IterativeImputer
-from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import math
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 def optimize_data_types(df):
     """
     Otimiza os tipos de dados para reduzir o uso de memória, convertendo tipos de 64 bits para 32 bits.
-    
-    Parâmetros:
-    - df: DataFrame a ser otimizado.
-    
-    Retorna:
-    - df: DataFrame com tipos de dados otimizados.
     """
     df = df.copy()
     
@@ -23,25 +20,14 @@ def optimize_data_types(df):
         df[col] = df[col].astype('float32')
     
     # Converter int64 para int32
-    for col in df.select_dtypes(include=['int64']).columns:
+    for col in df.select_dtypes(include=['int64', 'Int64']).columns:
         df[col] = df[col].astype('int32')
     
     return df
 
-def preprocess_data_MICE(df, station_id=None, exclude_cols=None):
+def preprocess_data_MICE(df, exclude_cols=None):
     """
     Pré-processa o dataset para preparação antes da imputação.
-
-    Parâmetros:
-    - df: DataFrame original.
-    - station_id: ID da estação para filtrar (opcional).
-    - exclude_cols: Lista de colunas a serem excluídas da imputação (opcional).
-
-    Retorna:
-    - df_preprocessed: DataFrame pré-processado.
-    - cols_to_impute: Lista de colunas a serem imputadas.
-    - imputable_cols: Lista de colunas a serem usadas como preditoras.
-    - label_encoder: Objeto LabelEncoder usado na codificação de 'id_estacao'.
     """
     df = df.copy()
 
@@ -58,51 +44,57 @@ def preprocess_data_MICE(df, station_id=None, exclude_cols=None):
     # Remover colunas desnecessárias
     df = df.drop(['data', 'hora'], axis=1)
 
-    # Codificar 'id_estacao' usando LabelEncoder
-    label_encoder = LabelEncoder()
-    df['id_estacao_cod'] = label_encoder.fit_transform(df['id_estacao']).astype('int32')
-
-    # Remover 'id_estacao' original
-    df = df.drop('id_estacao', axis=1)
-
     # Ordenar o DataFrame por 'data_hora'
     df = df.sort_values('data_hora').reset_index(drop=True)
 
     # Definir colunas a serem excluídas da imputação
     if exclude_cols is None:
-        exclude_cols = ['ano', 'mes', 'dia', 'hora_dia', 'data_hora', 'id_estacao_cod']
+        exclude_cols = ['data_hora', 'id_estacao']
     else:
-        exclude_cols.extend(['data_hora', 'id_estacao_cod'])
+        exclude_cols.extend(['data_hora', 'id_estacao'])
 
     # Selecionar colunas numéricas
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
-    # Todas as colunas numéricas serão usadas como preditoras
-    imputable_cols = numeric_cols + ['ano', 'mes', 'dia', 'hora_dia', 'id_estacao_cod']
+    # Definir as colunas a serem imputadas (excluindo as colunas que não precisam de imputação)
+    cols_to_impute = [col for col in numeric_cols if col not in exclude_cols]
 
-    # Remover duplicatas (caso as colunas já estejam em numeric_cols)
-    imputable_cols = list(set(imputable_cols))
+    # Definir as colunas imputáveis (todas as colunas numéricas que serão usadas como preditoras)
+    imputable_cols = cols_to_impute + ['ano', 'mes', 'dia', 'hora_dia']
 
     # Garantir que todas as colunas em imputable_cols estão no DataFrame
     imputable_cols = [col for col in imputable_cols if col in df.columns]
 
-    # Definir as colunas a serem imputadas (excluindo as colunas que não precisam de imputação)
-    cols_to_impute = [col for col in numeric_cols if col not in exclude_cols]
+    return df, cols_to_impute, imputable_cols
 
-    return df, cols_to_impute, imputable_cols, label_encoder
+def clean_temperature_columns(df, columns):
+    """
+    Transforma valores 0 e abaixo de 0 em NaN nas colunas especificadas.
+    Além disso, calcula e imprime a quantidade e a porcentagem de valores 0 ou abaixo antes da limpeza.
+    """
+    df = df.copy()
+    total_rows = len(df)
+    
+    for col in columns:
+        if col in df.columns:
+            # Calcular quantidade e porcentagem de valores <= 0 antes da limpeza
+            count_zero_or_below = (df[col] <= 0).sum()
+            percent_zero_or_below = (count_zero_or_below / total_rows) * 100
+            print(f"Coluna '{col}': {count_zero_or_below} ({percent_zero_or_below:.2f}%) valores eram 0 ou abaixo de 0 antes da limpeza.")
+            
+            # Transformar valores <= 0 em NaN
+            original_nan_count = df[col].isna().sum()
+            df.loc[df[col] <= 0, col] = np.nan
+            new_nan_count = df[col].isna().sum()
+            nan_added = new_nan_count - original_nan_count
+            print(f"Coluna '{col}': {nan_added} valores transformados em NaN.")
+        else:
+            print(f"Coluna '{col}' não encontrada no DataFrame.")
+    return df
 
 def introduce_missing_values(df, cols_to_introduce, missing_rate=0.1):
     """
     Introduz valores faltantes artificiais nas colunas especificadas.
-
-    Parâmetros:
-    - df: DataFrame pré-processado.
-    - cols_to_introduce: Lista de colunas onde serão introduzidos valores faltantes.
-    - missing_rate: Proporção de valores a serem removidos (entre 0 e 1).
-
-    Retorna:
-    - df_missing: DataFrame com valores faltantes introduzidos.
-    - missing_info: Dicionário com informações dos valores removidos (índices e valores reais).
     """
     df_missing = df.copy()
     missing_info = {}
@@ -117,41 +109,48 @@ def introduce_missing_values(df, cols_to_introduce, missing_rate=0.1):
         n_missing = int(len(non_null_indices) * missing_rate)
 
         # Selecionar índices aleatórios para remoção
-        missing_indices = np.random.choice(non_null_indices, n_missing, replace=False)
+        if n_missing > 0:
+            missing_indices = np.random.choice(non_null_indices, n_missing, replace=False)
 
-        # Armazenar os valores reais
-        missing_info[col] = {
-            'indices': missing_indices,
-            'values': df_missing.loc[missing_indices, col]
-        }
+            # Armazenar os valores reais
+            missing_info[col] = {
+                'indices': missing_indices,
+                'values': df_missing.loc[missing_indices, col]
+            }
 
-        # Introduzir valores faltantes
-        df_missing.loc[missing_indices, col] = np.nan
+            # Introduzir valores faltantes
+            df_missing.loc[missing_indices, col] = np.nan
+        else:
+            print(f"Coluna '{col}' não tem valores suficientes para introduzir valores faltantes.")
+            missing_info[col] = {
+                'indices': [],
+                'values': []
+            }
 
     return df_missing, missing_info
 
 def apply_mice(df, cols_to_impute, imputable_cols):
     """
     Aplica o MICE para imputação de valores faltantes nas colunas especificadas.
-
-    Parâmetros:
-    - df: DataFrame pré-processado (com valores faltantes artificiais introduzidos).
-    - cols_to_impute: Lista de colunas a serem imputadas.
-    - imputable_cols: Lista de colunas a serem usadas como preditoras.
-
-    Retorna:
-    - df_imputed: DataFrame com valores imputados.
     """
     df = df.copy()
 
-    # Configurar o imputador com BayesianRidge para reduzir o uso de memória
-    from sklearn.linear_model import BayesianRidge
+    from sklearn.ensemble import RandomForestRegressor
 
-    imputer = IterativeImputer(estimator=BayesianRidge(),
-                               max_iter=10, random_state=0)
+    imputer = IterativeImputer(estimator=RandomForestRegressor(
+                                   n_estimators=100,  # Número de árvores na floresta
+                                   max_depth=None,    # Profundidade máxima das árvores
+                                   random_state=24,
+                                   n_jobs=-1),
+                               max_iter=50,  # Número de iterações
+                               random_state=24,
+                               verbose=2)
 
     # Aplicar o imputador em todas as colunas imputáveis
     imputed_values = imputer.fit_transform(df[imputable_cols])
+
+    # Verificar a convergência
+    print(f"Convergência alcançada em {imputer.n_iter_} iterações.")
 
     # Criar um DataFrame com os valores imputados
     df_imputed = pd.DataFrame(imputed_values, columns=imputable_cols, index=df.index)
@@ -162,40 +161,17 @@ def apply_mice(df, cols_to_impute, imputable_cols):
 
     return df
 
-def postprocess_data(df, label_encoder):
-    """
-    Realiza pós-processamento após a imputação (se necessário).
-
-    Parâmetros:
-    - df: DataFrame após imputação.
-    - label_encoder: Objeto LabelEncoder usado no pré-processamento.
-
-    Retorna:
-    - df_postprocessed: DataFrame pós-processado.
-    """
-    df = df.copy()
-
-    # Reverter codificação de 'id_estacao'
-    df['id_estacao'] = label_encoder.inverse_transform(df['id_estacao_cod'].astype(int))
-
-    return df
-
 def evaluate_imputation(df_original, df_imputed, missing_info):
     """
     Avalia a imputação comparando os valores imputados com os valores reais removidos.
-
-    Parâmetros:
-    - df_original: DataFrame original (antes de introduzir valores faltantes artificiais).
-    - df_imputed: DataFrame após imputação.
-    - missing_info: Dicionário com informações dos valores removidos.
-
-    Retorna:
-    - metrics: Dicionário com métricas de erro para cada coluna.
     """
     metrics = {}
 
     for col, info in missing_info.items():
         indices = info['indices']
+        if len(indices) == 0:
+            print(f"Sem valores removidos para a coluna '{col}'.")
+            continue
         true_values = info['values']
         imputed_values = df_imputed.loc[indices, col]
 
@@ -215,3 +191,19 @@ def evaluate_imputation(df_original, df_imputed, missing_info):
         }
 
     return metrics
+
+def print_nan_percentage(df, title="Porcentagem de NaNs por Coluna"):
+    """
+    Calcula e imprime a porcentagem de valores NaN para cada coluna do DataFrame.
+    """
+    total_rows = len(df)
+    nan_counts = df.isna().sum()
+    nan_percent = (nan_counts / total_rows) * 100
+    nan_summary = pd.DataFrame({
+        'Total NaNs': nan_counts,
+        'Percentagem NaNs (%)': nan_percent
+    })
+    nan_summary = nan_summary.sort_values(by='Percentagem NaNs (%)', ascending=False)
+    
+    print(f"\n{title}:")
+    print(nan_summary)
